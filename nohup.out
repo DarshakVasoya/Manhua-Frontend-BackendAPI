@@ -1,0 +1,13 @@
+INFO:     Will watch for changes in these directories: ['/root/Manhua-Frontend-BackendAPI']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [13636] using StatReload
+INFO:     Started server process [13639]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+MongoDB connection successful. Documents in 'manhwa': 1668
+INFO:     134.93.62.240:43164 - "GET /manhwa HTTP/1.1" 200 OK
+INFO:     134.93.62.240:43163 - "GET /manhwa HTTP/1.1" 200 OK
+INFO:     134.93.62.240:43203 - "GET /docs HTTP/1.1" 200 OK
+INFO:     134.93.62.240:43203 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     134.93.62.240:43210 - "GET /manhwa?page=2&limit=20 HTTP/1.1" 200 OK
+INFO:     134.93.62.240:43210 - "GET /manhwa?page=2&limit=20 HTTP/1.1" 200 OK
