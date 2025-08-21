@@ -46,9 +46,12 @@ def serialize_manhwa(manhwa):
         "chapters": manhwa.get("chapters", [])
     }
 
+import re
 def normalize_name(name: str) -> str:
-    # Replace hyphens with spaces and decode URL encoding
-    return unquote(name.replace('-', ' '))
+    # Remove non-alphanumeric, lowercase
+    name = unquote(name)
+    name = re.sub(r'[^A-Za-z0-9]', '', name)
+    return name.lower()
 
 @app.get("/manhwa")
 def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, status: Optional[str] = None, page: int = 1, limit: int = 20):
@@ -88,19 +91,33 @@ def search_manhwa(query: str, page: int = 1, limit: int = 20):
 
 @app.get("/manhwa/{name}")
 def get_manhwa_detail_by_name(name: str):
-    name = normalize_name(name)
-    manhwa = collection.find_one({"name": name})
+    import re
+    # Normalize input: remove non-alphanumeric, lowercase
+    def normalize(s):
+        s = unquote(s)
+        s = re.sub(r'[^A-Za-z0-9]', '', s)
+        return s.lower()
+
+    normalized_input = normalize(name)
+    manhwa = None
+    for doc in collection.find({}, {"name": 1, "_id": 1}):
+        if "name" in doc and normalize(doc["name"]) == normalized_input:
+            manhwa = collection.find_one({"_id": doc["_id"]})
+            break
     if not manhwa:
         raise HTTPException(status_code=404, detail="Manhwa not found")
-    # Use serialize_manhwa to convert ObjectId and exclude chapters
     data = serialize_manhwa(manhwa)
     data.pop("chapters", None)
     return data
 
 @app.get("/manhwa/{name}/chapters")
 def get_chapters(name: str, order: str = "desc"):
-    name = normalize_name(name)
-    manhwa = collection.find_one({"name": name})
+    normalized_input = normalize_name(name)
+    manhwa = None
+    for doc in collection.find({}, {"name": 1, "_id": 1}):
+        if "name" in doc and normalize_name(doc["name"]) == normalized_input:
+            manhwa = collection.find_one({"_id": doc["_id"]})
+            break
     if not manhwa:
         raise HTTPException(status_code=404, detail="Manhwa not found")
     chapters = manhwa.get("chapters", [])
@@ -114,8 +131,12 @@ def get_chapters(name: str, order: str = "desc"):
 
 @app.get("/manhwa/{name}/chapters/{chapter_number}")
 def get_chapter_detail(name: str, chapter_number: int, order: str = "desc"):
-    name = normalize_name(name)
-    manhwa = collection.find_one({"name": name})
+    normalized_input = normalize_name(name)
+    manhwa = None
+    for doc in collection.find({}, {"name": 1, "_id": 1}):
+        if "name" in doc and normalize_name(doc["name"]) == normalized_input:
+            manhwa = collection.find_one({"_id": doc["_id"]})
+            break
     if not manhwa:
         raise HTTPException(status_code=404, detail="Manhwa not found")
     chapters = manhwa.get("chapters", [])
