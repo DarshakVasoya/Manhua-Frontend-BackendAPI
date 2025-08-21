@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from typing import List, Optional
 import os
@@ -9,6 +10,15 @@ def get_mongo_client():
     return MongoClient(uri)
 
 app = FastAPI()
+
+# Enable CORS for all origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # MongoDB connection (admin database)
 client = get_mongo_client()
@@ -50,7 +60,7 @@ def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, sta
     if status:
         query["status"] = status
     skip = (page - 1) * limit
-    projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "_id": 0}
+    projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "posted_on": 1, "_id": 0}
     # Sort by posted_on (if date), else fallback to _id for newest first
     manhwa_cursor = collection.find(query, projection).sort([("posted_on", -1), ("_id", -1)]).skip(skip).limit(limit)
     total = collection.count_documents(query)
