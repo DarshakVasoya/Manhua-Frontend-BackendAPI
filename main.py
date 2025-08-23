@@ -14,7 +14,7 @@ app = FastAPI()
 # Enable CORS for all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://manhwagalaxy.org"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
