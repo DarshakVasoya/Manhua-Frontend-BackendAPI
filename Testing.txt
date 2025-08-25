@@ -1,0 +1,25 @@
+ pkill -f "uvicorn"
+nohup uvicorn main:app --reload &
+
+A "502 Bad Gateway" error from Nginx means it cannot connect to your FastAPI backend. Common causes:
+
+1. **FastAPI server is not running**  
+   - Check with: `ps aux | grep uvicorn`
+   - If not running, start it: `source venv/bin/activate && nohup uvicorn main:app --reload &`
+
+2. **Wrong port in Nginx config**  
+   - Make sure Nginx is proxying to the correct port (default is 8000).
+   - Check your Nginx config: `sudo nano /etc/nginx/sites-available/default` (or your custom config).
+
+3. **Firewall or network issues**  
+   - Ensure nothing is blocking port 8000.
+
+4. **FastAPI crashed or errors**  
+   - Check logs: `tail -n 50 nohup.out`
+
+To resolve:
+- Make sure FastAPI is running and listening on the port Nginx expects.
+- Restart Nginx: `sudo systemctl restart nginx`
+- Fix any errors in your FastAPI logs.
+
+Let me know if you want to check your Nginx config or see FastAPI logs!

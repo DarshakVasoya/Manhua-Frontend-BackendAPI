@@ -1,3 +1,49 @@
+# Running the FastAPI Server
+
+## 1. Activate your Python virtual environment
+```
+source venv/bin/activate
+```
+
+## 2. Start the FastAPI server with auto-reload
+```
+nohup uvicorn main:app --reload &
+```
+This will run the server in the background and auto-reload on code changes. Output is logged to `nohup.out`.
+
+## 3. Stop and restart the server
+To stop all running Uvicorn processes:
+```
+pkill -f "uvicorn"
+```
+To restart:
+```
+nohup uvicorn main:app --reload &
+```
+
+## 4. Check server status and logs
+Check if Uvicorn is running:
+```
+ps aux | grep uvicorn
+```
+View logs:
+```
+tail -n 50 nohup.out
+```
+
+## 5. Nginx Reverse Proxy
+If using Nginx, ensure it proxies to the correct port (default is 8000):
+```
+proxy_pass http://127.0.0.1:8000;
+```
+Restart Nginx after changes:
+```
+sudo systemctl restart nginx
+```
+
+## 6. Troubleshooting
+- If you see "502 Bad Gateway" from Nginx, check that FastAPI is running and listening on the expected port.
+- If you see errors, check `nohup.out` for details.
 # Manhwa Backend API
 
 A FastAPI backend for serving manhwa/manga data from MongoDB, designed for frontend sites like kingofshojo.com.

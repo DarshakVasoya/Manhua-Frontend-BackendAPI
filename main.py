@@ -1,3 +1,11 @@
+
+from fuzzywuzzy import fuzz
+from synonyms import SYNONYMS
+# Find chapter images by chapternum match
+
+# ...existing code...
+
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
@@ -14,7 +22,7 @@ app = FastAPI()
 # Enable CORS for all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://manhwagalaxy.org"],
+    allow_origins=["https://manhwagalaxy.org", "http://165.232.60.4:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,6 +55,10 @@ def serialize_manhwa(manhwa):
     }
 
 import re
+import redis
+
+# Redis connection (default settings, adjust as needed)
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
 def normalize_name(name: str) -> str:
     # Remove non-alphanumeric, lowercase
     name = unquote(name)
@@ -63,30 +75,72 @@ def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, sta
     if status:
         query["status"] = status
     skip = (page - 1) * limit
-    projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "posted_on": 1, "_id": 0}
-    # Sort by posted_on (if date), else fallback to _id for newest first
-    manhwa_cursor = collection.find(query, projection).sort([("posted_on", -1), ("_id", -1)]).skip(skip).limit(limit)
+    projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "posted_on": 1, "updated_at": 1, "_id": 0}
+
+    # Create a cache key based on query params
+    cache_key = f"manhwa_home:{genre}:{type}:{status}:{page}:{limit}"
+    cached = redis_client.get(cache_key)
+    if cached:
+        import json
+        return json.loads(cached)
+
+    # Sort descending by updated_at (newest first)
+    manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
     total = collection.count_documents(query)
-    return {
+    import json
+    def convert(obj):
+        if isinstance(obj, dict):
+            return {k: convert(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert(i) for i in obj]
+        elif hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        else:
+            return obj
+
+    result = {
         "total": total,
         "page": page,
         "limit": limit,
-        "results": list(manhwa_cursor)
+        "results": convert(list(manhwa_cursor))
     }
+    # Cache for 6 hours (21600 seconds)
+    redis_client.setex(cache_key, 3600, json.dumps(result))
+    return result
 
 @app.get("/manhwa/search")
 def search_manhwa(query: str, page: int = 1, limit: int = 20):
     query_str = normalize_name(query)
     skip = (page - 1) * limit
-    regex = f"^{query_str}"  # Prefix match for faster search
-    projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "_id": 0}
-    manhwa_cursor = collection.find({"name": {"$regex": regex, "$options": "i"}}, projection).sort([("posted_on", -1), ("_id", -1)]).skip(skip).limit(limit)
-    total = collection.count_documents({"name": {"$regex": regex, "$options": "i"}})
+    projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "posted_on": 1, "updated_at": 1, "_id": 0}
+
+    # Expand query with synonyms
+    search_terms = [query_str]
+    for key, values in SYNONYMS.items():
+        if query_str == key or query_str in values:
+            search_terms.extend([key] + values)
+
+    # Fetch all candidates (limit for performance)
+    candidates = list(collection.find({}, projection))
+    # Fuzzy match
+    matched = []
+    for doc in candidates:
+        name = doc.get("name", "").lower()
+        for term in search_terms:
+            score = fuzz.partial_ratio(term, name)
+            if score >= 80:
+                matched.append(doc)
+                break
+
+    # Pagination
+    total = len(matched)
+    results = matched[skip:skip+limit]
     return {
         "total": total,
         "page": page,
         "limit": limit,
-        "results": list(manhwa_cursor)
+        "query": query,
+        "results": results
     }
 
 @app.get("/manhwa/{name}")
@@ -130,7 +184,7 @@ def get_chapters(name: str, order: str = "desc"):
     return chapters
 
 @app.get("/manhwa/{name}/chapters/{chapter_number}")
-def get_chapter_detail(name: str, chapter_number: int, order: str = "desc"):
+def get_chapter_detail(name: str, chapter_number: str, order: str = "desc"):
     normalized_input = normalize_name(name)
     manhwa = None
     for doc in collection.find({}, {"name": 1, "_id": 1}):
@@ -145,9 +199,13 @@ def get_chapter_detail(name: str, chapter_number: int, order: str = "desc"):
     # Allow order param: desc (default) or asc
     if order == "desc":
         chapters = list(reversed(chapters))
-    if chapter_number < 1 or chapter_number > len(chapters):
-        raise HTTPException(status_code=404, detail="Chapter not found")
-    return chapters[chapter_number - 1]
+    chapternum_str = f"Chapter {chapter_number}"
+    for chapter in chapters:
+        if chapter.get("chapternum") == chapternum_str:
+            return chapter
+    raise HTTPException(status_code=404, detail="Chapter not found")
+
+
 
 @app.get("/manhwa/count")
 def get_manhwa_count():
@@ -162,5 +220,7 @@ def test_db_connection():
         print(f"MongoDB connection successful. Documents in 'manhwa': {count}")
     except Exception as e:
         print(f"MongoDB connection failed: {e}")
+# Place this endpoint after app = FastAPI() and all other endpoints
+
 
 # To run: uvicorn main:app --reload
