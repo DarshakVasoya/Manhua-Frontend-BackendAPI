@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pymongo import MongoClient
+from pymongo.collation import Collation
 from typing import List, Optional
 import os
 from urllib.parse import unquote
@@ -171,8 +172,13 @@ def _make_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", re.sub(r"\s+", "-", name.strip().lower()))
 
 def _rate_limited(ip: str, limit: int = 60, window: int = 60) -> bool:
+    """Simple fixed-window rate limiter using Redis.
+    Returns True when the caller exceeded the limit within the current window.
+    If Redis is unavailable, it never blocks (returns False).
+    """
     try:
-        key = f"rl:suggest:{ip}:{int(datetime.utcnow().timestamp() // window)}"
+        now_window = int(datetime.utcnow().timestamp() // window)
+        key = f"rl:suggest:{ip}:{now_window}"
         current = redis_client.incr(key)
         if current == 1:
             redis_client.expire(key, window)
@@ -268,7 +274,7 @@ def suggest(request: Request, response: Response, prefix: str = "", limit: int =
         return {"items": [], "cachedAt": datetime.utcnow().isoformat() + "Z", "ttl": 60}
 
 @app.get("/manhwa")
-def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, status: Optional[str] = None, page: int = 1, limit: int = 20):
+def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, status: Optional[str] = None, page: int = 1, limit: int = 20, sort: Optional[str] = "latest"):
     query = {}
     # Flexible genre filter: support string or array (comma-separated)
     if genre:
@@ -286,14 +292,45 @@ def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, sta
     projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "posted_on": 1, "updated_at": 1, "_id": 0}
 
     # Create a cache key based on query params
-    cache_key = f"manhwa_home:{genre}:{type}:{status}:{page}:{limit}"
+    cache_key = f"manhwa_home:{genre}:{type}:{status}:{page}:{limit}:{sort}"
     cached = redis_client.get(cache_key)
     if cached:
         import json
         return json.loads(cached)
 
-    # Sort descending by updated_at (newest first)
-    manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
+    # Sorting
+    sort = (sort or "").lower().strip()
+    if sort in ("", "latest"):
+        # Sort by updated_at desc
+        manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
+    elif sort == "az":
+        # Sort by name A->Z, case-insensitive collation
+        manhwa_cursor = (
+            collection
+            .find(query, projection)
+            .collation(Collation(locale='en', strength=2))
+            .sort("name", 1)
+            .skip(skip)
+            .limit(limit)
+        )
+    elif sort == "rating":
+        # Sort by rating (numeric) desc using aggregation (handles string ratings)
+        pipeline = [
+            {"$match": query},
+            {"$addFields": {
+                "rating_num": {
+                    "$convert": {"input": "$rating", "to": "double", "onError": 0, "onNull": 0}
+                }
+            }},
+            {"$sort": {"rating_num": -1}},
+            {"$project": {**projection, "rating_num": 0}},
+            {"$skip": skip},
+            {"$limit": limit}
+        ]
+        manhwa_cursor = collection.aggregate(pipeline)
+    else:
+        # Fallback to latest
+        manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
     total = collection.count_documents(query)
     import json
     def convert(obj):
@@ -317,7 +354,7 @@ def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, sta
     return result
 
 @app.get("/manhwa/search")
-def search_manhwa(query: Optional[str] = None, page: int = 1, limit: int = 20, genre: Optional[str] = None):
+def search_manhwa(query: Optional[str] = None, page: int = 1, limit: int = 20, genre: Optional[str] = None, sort: Optional[str] = "latest"):
     skip = (page - 1) * limit
     projection = {"name": 1, "last_chapter": 1, "rating": 1, "cover_image": 1, "posted_on": 1, "updated_at": 1, "_id": 0}
 
@@ -354,6 +391,38 @@ def search_manhwa(query: Optional[str] = None, page: int = 1, limit: int = 20, g
     else:
         # If no query, return all candidates (filtered by genre)
         matched = candidates
+
+    # Sorting (before pagination)
+    s = (sort or "").lower().strip()
+    if s in ("", "latest"):
+        # Sort by updated_at desc; missing -> oldest
+        def _ts(doc):
+            v = doc.get("updated_at")
+            try:
+                # Assume datetime-like
+                if hasattr(v, "timestamp"):
+                    return v
+                # Try parse ISO string
+                from datetime import datetime as _dt
+                if isinstance(v, str):
+                    try:
+                        return _dt.fromisoformat(v.replace("Z", "+00:00"))
+                    except Exception:
+                        return _dt(1970,1,1)
+            except Exception:
+                pass
+            from datetime import datetime as _dt
+            return _dt(1970,1,1)
+        matched.sort(key=_ts, reverse=True)
+    elif s == "az":
+        matched.sort(key=lambda d: (d.get("name") or "").lower())
+    elif s == "rating":
+        def _rating(doc):
+            try:
+                return float(doc.get("rating") or 0)
+            except Exception:
+                return 0.0
+        matched.sort(key=_rating, reverse=True)
 
     # Pagination
     total = len(matched)
