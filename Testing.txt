@@ -1,6 +1,9 @@
  pkill -f "uvicorn"
 nohup uvicorn main:app --reload &
 
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+
 A "502 Bad Gateway" error from Nginx means it cannot connect to your FastAPI backend. Common causes:
 
 1. **FastAPI server is not running**  

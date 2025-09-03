@@ -1,3 +1,6 @@
+# AI-powered search endpoint
+from fastapi import Body
+
 
 from fuzzywuzzy import fuzz
 from synonyms import SYNONYMS
@@ -558,7 +561,7 @@ def get_manhwa_count():
 
 
 
-# To run: uvicorn main:app --reload
+# To run:  uvicorn main:app --host 0.0.0.0 --port 8000 --reload   in venv
 # Global error handler to avoid exposing internal errors
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
