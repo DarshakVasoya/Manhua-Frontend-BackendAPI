@@ -1,13 +1,27 @@
+
 #!/bin/bash
-# Generate sitemap and copy to frontend every three hours
-LOGFILE="/root/Manhua-Frontend-BackendAPI/update_sitemaps.log"
+# Generalized sitemap update script
+# Load environment variables from .env if present
+if [ -f .env ]; then
+	set -a
+	. ./.env
+	set +a
+fi
+
+BACKEND_DIR="${BACKEND_DIR:-$(pwd)}"
+FRONTEND_DIR="${FRONTEND_DIR:-$BACKEND_DIR/../Manhua-Frontend}"
+LOGFILE="$BACKEND_DIR/update_sitemaps.log"
 
 {
 	echo "--- $(date) ---"
 	echo "Running sitemap generation..."
-	python /root/Manhua-Frontend-BackendAPI/generate_sitemap_split.py
+	python "$BACKEND_DIR/generate_sitemap_split.py"
 	echo "Copying sitemap files..."
-	cp /root/Manhua-Frontend-BackendAPI/sitemaps/*.xml ~/Manhua-Frontend/public/sitemaps/
-	cp /root/Manhua-Frontend-BackendAPI/sitemap-index.xml ~/Manhua-Frontend/public/
+	mkdir -p "$FRONTEND_DIR/public/sitemaps"
+	cp "$BACKEND_DIR/sitemaps"/*.xml "$FRONTEND_DIR/public/sitemaps/"
+	cp "$BACKEND_DIR/sitemap-index.xml" "$FRONTEND_DIR/public/"
 	echo "Done."
 } >> "$LOGFILE" 2>&1
+
+
+

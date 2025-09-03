@@ -1,7 +1,11 @@
+
 from pymongo import MongoClient
+from dotenv import load_dotenv
+import os
 
 def get_mongo_client():
-    uri = "mongodb://darshak:DarshakVasoya1310%40@165.232.60.4:27017/admin?authSource=admin"
+    load_dotenv()
+    uri = os.getenv("MONGO_URI")
     return MongoClient(uri)
 
 client = get_mongo_client()

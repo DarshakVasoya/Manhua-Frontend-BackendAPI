@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from datetime import datetime, UTC
 from urllib.parse import quote
 
-BASE_URL = "https://manhwagalaxy.org"
+BASE_URL = os.getenv("BASE_URL", "https://manhwagalaxy.org")
 SITEMAP_DIR = "sitemaps"
 SITEMAP_INDEX_PATH = "sitemap-index.xml"
 MAX_URLS_PER_FILE = 49000
@@ -87,27 +87,27 @@ def generate_all_urls():
             manga_lastmod = now
         loc = f"{BASE_URL}/details/{name_slug}"
         urls.append(build_url_entry(loc, manga_lastmod, "weekly", "0.8"))
-        chapters = manga.get("chapters", [])
-        for chapter in chapters:
-            chapternum = chapter.get("chapternum")
-            chapter_lastmod = chapter.get("updated_at") or manga_lastmod
-            if isinstance(chapter_lastmod, str):
-                date_part = chapter_lastmod[:10]
-                if re.match(r"^\d{4}-\d{2}-\d{2}$", date_part):
-                    chapter_lastmod = date_part
-                else:
-                    chapter_lastmod = manga_lastmod
-            elif hasattr(chapter_lastmod, 'strftime'):
-                chapter_lastmod = chapter_lastmod.strftime('%Y-%m-%d')
-            else:
-                chapter_lastmod = manga_lastmod
-            if chapternum:
-                try:
-                    chapter_number = int(chapternum.split()[-1])
-                except Exception:
-                    continue
-                chapter_loc = f"{BASE_URL}/details/{name_slug}/chapters/{chapter_number}"
-                urls.append(build_url_entry(chapter_loc, chapter_lastmod, "never", "0.6"))
+        # chapters = manga.get("chapters", [])
+        # for chapter in chapters:
+        #     chapternum = chapter.get("chapternum")
+        #     chapter_lastmod = chapter.get("updated_at") or manga_lastmod
+        #     if isinstance(chapter_lastmod, str):
+        #         date_part = chapter_lastmod[:10]
+        #         if re.match(r"^\d{4}-\d{2}-\d{2}$", date_part):
+        #             chapter_lastmod = date_part
+        #         else:
+        #             chapter_lastmod = manga_lastmod
+        #     elif hasattr(chapter_lastmod, 'strftime'):
+        #         chapter_lastmod = chapter_lastmod.strftime('%Y-%m-%d')
+        #     else:
+        #         chapter_lastmod = manga_lastmod
+        #     if chapternum:
+        #         try:
+        #             chapter_number = int(chapternum.split()[-1])
+        #         except Exception:
+        #             continue
+        #         chapter_loc = f"{BASE_URL}/details/{name_slug}/chapters/{chapter_number}"
+        #         urls.append(build_url_entry(chapter_loc, chapter_lastmod, "never", "0.6"))
     return urls
 
 def write_sitemap_files(urls):

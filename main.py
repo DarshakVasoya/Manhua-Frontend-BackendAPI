@@ -13,33 +13,63 @@ from pymongo import MongoClient
 from pymongo.collation import Collation
 from typing import List, Optional
 import os
+from dotenv import load_dotenv
 from urllib.parse import unquote
 
+load_dotenv()
 def get_mongo_client():
-    uri = os.getenv("MONGO_URI", "mongodb://darshak:DarshakVasoya1310%40@165.232.60.4:27017/admin?authSource=admin")
+    uri = os.getenv("MONGO_URI")
     return MongoClient(uri)
 
-app = FastAPI()
+
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup code
+    try:
+        if db is not None:
+            db.list_collection_names()
+            count = collection.count_documents({})
+            print(f"MongoDB connection successful. Documents in 'manhwa': {count}")
+        else:
+            print("MongoDB connection failed: Database object is None.")
+    except Exception as e:
+        print(f"MongoDB connection failed: {e}")
+    yield
+    # Shutdown code (if needed)
+
+app = FastAPI(lifespan=lifespan)
+
+# Place this endpoint after app = FastAPI() and all other endpoints
 
 # Enable CORS for all origins
+cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://manhwagalaxy.org", "http://165.232.60.4:3001","http://192.168.0.102:3000/"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Enable gzip compression for responses
-app.add_middleware(GZipMiddleware, minimum_size=500)
+gzip_min_size = int(os.getenv("GZIP_MIN_SIZE", "500"))
+app.add_middleware(GZipMiddleware, minimum_size=gzip_min_size)
 
 
-# MongoDB connection (admin database)
-client = get_mongo_client()
-db = client["admin"]
-collection = db["manhwa"]
-# Contact Us collection
-contact_collection = db["contact_us"]
+# MongoDB connection (admin database) with error handling
+try:
+    client = get_mongo_client()
+    db = client["admin"]
+    collection = db["manhwa"]
+    contact_collection = db["contact_us"]
+except Exception as e:
+    print(f"MongoDB connection error: {e}")
+    db = None
+    collection = None
+    contact_collection = None
 # ...existing code...
 
 # Contact Us Models
@@ -123,8 +153,18 @@ from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from collections import OrderedDict
 
-# Redis connection (default settings, adjust as needed)
-redis_client = redis.Redis(host='localhost', port=6379, db=0)
+# Redis connection (from .env) with error handling
+try:
+    redis_client = redis.Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=int(os.getenv("REDIS_DB", "0"))
+    )
+    # Test connection
+    redis_client.ping()
+except Exception as e:
+    print(f"Redis connection error: {e}")
+    redis_client = None
 def normalize_name(name: str) -> str:
     # Remove non-alphanumeric, lowercase
     name = unquote(name)
@@ -275,6 +315,10 @@ def suggest(request: Request, response: Response, prefix: str = "", limit: int =
 
 @app.get("/manhwa")
 def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, status: Optional[str] = None, page: int = 1, limit: int = 20, sort: Optional[str] = "latest"):
+    if collection is None:
+        return JSONResponse(status_code=500, content={"detail": "MongoDB connection error. Please check your database settings and network."})
+    if redis_client is None:
+        return JSONResponse(status_code=500, content={"detail": "Redis connection error. Please check your Redis server and settings."})
     query = {}
     # Flexible genre filter: support string or array (comma-separated)
     if genre:
@@ -293,45 +337,51 @@ def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, sta
 
     # Create a cache key based on query params
     cache_key = f"manhwa_home:{genre}:{type}:{status}:{page}:{limit}:{sort}"
-    cached = redis_client.get(cache_key)
+    try:
+        cached = redis_client.get(cache_key)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"Redis error: {e}"})
     if cached:
         import json
         return json.loads(cached)
 
     # Sorting
     sort = (sort or "").lower().strip()
-    if sort in ("", "latest"):
-        # Sort by updated_at desc
-        manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
-    elif sort == "az":
-        # Sort by name A->Z, case-insensitive collation
-        manhwa_cursor = (
-            collection
-            .find(query, projection)
-            .collation(Collation(locale='en', strength=2))
-            .sort("name", 1)
-            .skip(skip)
-            .limit(limit)
-        )
-    elif sort == "rating":
-        # Sort by rating (numeric) desc using aggregation (handles string ratings)
-        pipeline = [
-            {"$match": query},
-            {"$addFields": {
-                "rating_num": {
-                    "$convert": {"input": "$rating", "to": "double", "onError": 0, "onNull": 0}
-                }
-            }},
-            {"$sort": {"rating_num": -1}},
-            {"$project": {**projection, "rating_num": 0}},
-            {"$skip": skip},
-            {"$limit": limit}
-        ]
-        manhwa_cursor = collection.aggregate(pipeline)
-    else:
-        # Fallback to latest
-        manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
-    total = collection.count_documents(query)
+    try:
+        if sort in ("", "latest"):
+            # Sort by updated_at desc
+            manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
+        elif sort == "az":
+            # Sort by name A->Z, case-insensitive collation
+            manhwa_cursor = (
+                collection
+                .find(query, projection)
+                .collation(Collation(locale='en', strength=2))
+                .sort("name", 1)
+                .skip(skip)
+                .limit(limit)
+            )
+        elif sort == "rating":
+            # Sort by rating (numeric) desc using aggregation (handles string ratings)
+            pipeline = [
+                {"$match": query},
+                {"$addFields": {
+                    "rating_num": {
+                        "$convert": {"input": "$rating", "to": "double", "onError": 0, "onNull": 0}
+                    }
+                }},
+                {"$sort": {"rating_num": -1}},
+                {"$project": {**projection, "rating_num": 0}},
+                {"$skip": skip},
+                {"$limit": limit}
+            ]
+            manhwa_cursor = collection.aggregate(pipeline)
+        else:
+            # Fallback to latest
+            manhwa_cursor = collection.find(query, projection).sort("updated_at", -1).skip(skip).limit(limit)
+        total = collection.count_documents(query)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"MongoDB error: {e}"})
     import json
     def convert(obj):
         if isinstance(obj, dict):
@@ -349,8 +399,10 @@ def get_manhwa_list(genre: Optional[str] = None, type: Optional[str] = None, sta
         "limit": limit,
         "results": convert(list(manhwa_cursor))
     }
-    # Cache for 6 hours (21600 seconds)
-    redis_client.setex(cache_key, 3600, json.dumps(result))
+    try:
+        redis_client.setex(cache_key, 3600, json.dumps(result))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"Redis error: {e}"})
     return result
 
 @app.get("/manhwa/search")
@@ -504,15 +556,6 @@ def get_manhwa_count():
     count = collection.count_documents({})
     return {"count": count}
 
-@app.on_event("startup")
-def test_db_connection():
-    try:
-        db.list_collection_names()
-        count = collection.count_documents({})
-        print(f"MongoDB connection successful. Documents in 'manhwa': {count}")
-    except Exception as e:
-        print(f"MongoDB connection failed: {e}")
-# Place this endpoint after app = FastAPI() and all other endpoints
 
 
 # To run: uvicorn main:app --reload
