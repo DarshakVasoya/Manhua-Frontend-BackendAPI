@@ -1,3 +1,96 @@
+# Running the FastAPI Server & Periodic Sitemap Updates
+
+## Local Development
+
+### 1. Activate your Python virtual environment
+```bash
+source venv/bin/activate
+```
+
+### 2. Start the FastAPI server with auto-reload
+```bash
+uvicorn main:app --reload
+```
+
+### 3. Run the sitemap update script manually
+```bash
+bash update_sitemaps.sh
+```
+
+### 4. Environment Variables
+Configure `.env` for MongoDB, Redis, CORS, and directory paths:
+```
+MONGO_URI=...
+REDIS_HOST=...
+REDIS_PORT=6379
+REDIS_DB=0
+CORS_ORIGINS=https://manhwagalaxy.org,http://165.232.60.4:3001,http://192.168.0.102:3000/
+BACKEND_DIR=...
+FRONTEND_DIR=...
+GZIP_MIN_SIZE=500
+```
+
+## Docker & Production
+
+This project supports running both the API and periodic sitemap updates in a single Docker container using `supervisord`.
+
+### 1. Build the Docker image
+```bash
+docker build -t manhua-backend .
+```
+
+### 2. Run the container
+```bash
+docker run -d --name backend -p 8000:8000 manhua-backend
+```
+
+### 3. What happens in Docker?
+- The API runs via Uvicorn (`main.py`)
+- The sitemap update script (`update_sitemaps.sh`) runs every 3 hours
+- Both are managed by `supervisord` (see `supervisord.conf`)
+- Logs are written to `/app/api.log`, `/app/api.err.log`, `/app/sitemap.log`, `/app/sitemap.err.log`
+
+### 4. Customizing the schedule
+Edit the `sleep 10800` value in `supervisord.conf` to change the interval (in seconds).
+
+### 5. Stopping & restarting
+```bash
+docker stop backend
+docker start backend
+```
+
+## Nginx Reverse Proxy
+If using Nginx, ensure it proxies to the correct port (default is 8000):
+```nginx
+proxy_pass http://127.0.0.1:8000;
+```
+Restart Nginx after changes:
+```bash
+sudo systemctl restart nginx
+```
+
+## Troubleshooting
+- If you see "502 Bad Gateway" from Nginx, check that FastAPI is running and listening on the expected port.
+- If you see errors, check Docker logs or `/app/*.log` files in the container.
+
+## Running Locally
+1. Install dependencies:
+  ```bash
+  pip install fastapi uvicorn pymongo
+  ```
+2. Set up MongoDB and configure your connection string in `main.py` or via `MONGO_URI` env variable.
+3. Start the server:
+  ```bash
+  uvicorn main:app --reload
+  ```
+4. Visit [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for API documentation.
+
+## Notes
+- Make sure your MongoDB has an index on `name` for fast search.
+- Store `posted_on` as a date for best sorting (currently string, can be improved).
+- All endpoints return lightweight, frontend-friendly data.
+- Error messages for MongoDB/Redis connection issues are returned in API responses.
+
 # Running the FastAPI Server
 
 ## 1. Activate your Python virtual environment
